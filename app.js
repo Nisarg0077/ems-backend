@@ -189,6 +189,132 @@ app.post('/api/departmentlist', async (req, res) => {
   }
 });
 
+
+app.post('/api/employee/addemployee', async (req, res) => {
+  try {
+    const {
+      first_name,
+      last_name,
+      email,
+      phone,
+      department_name,       // ← frontend should send name, not id
+      position,
+      salary,
+      hire_date,
+      status = 'Active',
+    } = req.body;
+
+    // ────────────────────────────────────────
+    // 1. Required fields validation
+    // ────────────────────────────────────────
+    if (!first_name || !last_name || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'first_name, last_name and email are required',
+      });
+    }
+
+    // Optional: very basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email format',
+      });
+    }
+
+    // ────────────────────────────────────────
+    // 2. Find department_id by name (safe)
+    // ────────────────────────────────────────
+    const [departments] = await db.query(
+      'SELECT id FROM departments WHERE name = ?',
+      [department_name]
+    );
+
+    if (departments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Department '${department_name}' not found`,
+      });
+    }
+
+    const department_id = departments[0].id;
+
+    // ────────────────────────────────────────
+    // 3. Prepare insert – only known/safe columns
+    // ────────────────────────────────────────
+    const allowedFields = [
+      'first_name', 'last_name', 'email', 'phone',
+      'department_id', 'position', 'salary', 'hire_date', 'status'
+    ];
+
+    const dataToInsert = {
+      first_name,
+      last_name,
+      email,
+      phone: phone || null,
+      department_id,
+      position: position || null,
+      salary: salary ? Number(salary) : null,
+      hire_date: hire_date || null,
+      status,
+    };
+
+    const columns = [];
+    const values = [];
+
+    for (const field of allowedFields) {
+      if (dataToInsert[field] !== undefined) {
+        columns.push(field);
+        values.push(dataToInsert[field]);
+      }
+    }
+
+    if (columns.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid fields provided',
+      });
+    }
+
+    const placeholders = columns.map(() => '?').join(', ');
+    const query = `INSERT INTO employees (${columns.join(', ')}) VALUES (${placeholders})`;
+
+    // ────────────────────────────────────────
+    // 4. Execute
+    // ────────────────────────────────────────
+    const [result] = await db.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: 'Employee created successfully',
+      employeeId: result.insertId,
+    });
+
+  } catch (error) {
+    console.error('Add employee error:', error);
+
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        success: false,
+        message: 'Employee with this email already exists',
+      });
+    }
+
+    if (error.code === 'ER_NO_REFERENCED_ROW_2') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid department_id',
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create employee',
+      error: error.message,
+    });
+  }
+});
+
 // ✅ Start after DB is ready
 initDB().then(() => {
   app.listen(port, () => {
